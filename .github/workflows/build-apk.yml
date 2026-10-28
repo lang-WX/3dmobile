@@ -6,6 +6,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    env:
+      PIP_NO_INPUT: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -30,28 +32,43 @@ jobs:
           test -f 3d_mobile/main.py || { echo "ERROR: 没有 3d_mobile/main.py"; exit 1; }
           test -f 3d_mobile/buildozer.spec || { echo "ERROR: 没有 buildozer.spec"; exit 1; }
 
-      - name: Cache
+      - name: Install deps
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y git zip unzip autoconf libtool pkg-config \
+            zlib1g-dev libncurses-dev cmake libffi-dev libssl-dev build-essential
+          python -m pip install --upgrade pip
+          python -m pip install buildozer==1.5.0 cython==0.29.36
+
+      - name: Cache buildozer
         uses: actions/cache@v4
         with:
           path: |
             ~/.buildozer
             3d_mobile/.buildozer
-          key: bz-${{ runner.os }}-${{ hashFiles('3d_mobile/buildozer.spec') }}
-
-      - name: Install deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y git zip unzip autoconf libtool pkg-config \
-            zlib1g-dev libncurses-dev cmake libffi-dev libssl-dev
-          python -m pip install --upgrade pip
-          python -m pip install buildozer cython==0.29.36
+          key: bz-arm64-${{ runner.os }}-${{ hashFiles('3d_mobile/buildozer.spec') }}
 
       - name: Build
         working-directory: 3d_mobile
-        run: buildozer -v android debug
+        shell: bash
+        run: |
+          set -o pipefail
+          { yes || true; } | buildozer -v android debug 2>&1 | tee build_output.txt
+          echo "==== bin ===="
+          ls -la bin || true
+          ls -la bin/*.apk || { echo "ERROR: 没有生成 APK"; exit 1; }
 
-      - name: Upload
+      - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: 3d-mobile-apk
           path: 3d_mobile/bin/*.apk
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: 3d_mobile/build_output.txt
